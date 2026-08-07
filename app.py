@@ -17,7 +17,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# 모바일 UI 깨짐 방지 및 언어 강제 고정 CSS
 st.markdown("""
+    <script>
+    document.documentElement.lang = 'ko';
+    </script>
     <style>
     .main-header { font-size: 2.1rem; font-weight: 700; color: #0F172A; margin-bottom: 0.2rem; }
     .sub-header { font-size: 0.95rem; color: #475569; margin-bottom: 1.5rem; }
@@ -29,7 +33,18 @@ st.markdown("""
         padding:12px 16px; font-size:0.85rem; color:#92400E; margin-top:1.5rem;
     }
     
-    /* 📱 모바일 환경 API 키(비밀번호) 눈동자 아이콘 글자 깨짐 방지 CSS 추가 */
+    /* 📱 모바일 환경 버튼 및 입력창 최적화 */
+    div.stButton > button {
+        white-space: normal !important;
+        height: auto !important;
+        min-height: 45px;
+        word-break: keep-all;
+    }
+    .stFileUploader label, .stTextInput label {
+        font-size: 0.9rem !important;
+    }
+    
+    /* 📱 모바일 환경 API 키(비밀번호) 눈동자 아이콘 글자 깨짐 방지 */
     div[data-testid="stTextInput"] button {
         font-size: 0 !important;
         min-width: 30px !important;
