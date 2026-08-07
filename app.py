@@ -110,7 +110,7 @@ user_prompt = st.text_area(
     "추가 사업 개요 및 강조 사항 (PDF 업로드 시 부연설명만 적거나 비워둬도 됨):",
     key="user_prompt_text",
     height=120,
-    placeholder="예시: 도심지 내 연면적 12,000㎡ 규모의 공공 복합청사를 추정금액 350억 원에 신축한다. 기존 노후 건물(석면 함유 의심) 철거가 포함된다."
+    placeholder="예시: 도심지 내 연면적 60,000㎡ 규모의 공공 청사를 신축한다. 기존 노후 청사 철거 및 지하 1층 공사가 포함된다."
 )
 submit_btn = st.button("🔍 맞춤형 정밀 행정 검토 실행", use_container_width=True)
 
@@ -148,7 +148,7 @@ SYSTEM_INSTRUCTION = """
    - **[감사 타겟]** 법정 경비(산업안전보건관리비, 환경보전비, 4대 사회보험료 등) 사후정산 조건 명시 여부와 **'하도급지킴이(전자대금시스템)'** 의무 적용을 검토하라.
 
 6. **[자율 발굴] 특기사항 및 숨은 리스크:** 
-   - 위 항목 외에 해당 사업 특성(어린이보호구역 겹침, 멸종위기종, 특수 공법 등)을 고려해 현장 실무자가 챙겨야 할 숨은 리스크를 자율적으로 도출하라.
+   - 위 항목 외에 해당 사업 특성(대규모 철거 시 석면·소음 민원, 도심지 대형 장비 동선 등)을 고려해 현장 실무자가 챙겨야 할 숨은 리스크를 자율적으로 도출하라.
 
 [작성 수칙]
 - 위 1~5번 항목 중 기준에 미달하는 항목은 과감하게 "해당 없음 (사유: 면적/금액/굴착깊이 미달)"으로 명확히 기재하여 실무자가 안심할 수 있게 하라.
@@ -196,18 +196,26 @@ def analyze_comprehensive_project(text: str, file_obj, key: str, model_name: str
         response_schema=ComprehensiveReviewResponse,
     )
     
-    with st.spinner("공공 공사 전체 법정 풀(Pool) 스캔 및 리스크 자율 발굴을 수행 중이다..."):
+    # 💡 max_output_tokens=8192 추가로 연면적 6만㎡ 같은 대규모 공사 분석 시 응답 잘림/파싱 오류 원천 방지
+    with st.spinner("공공 공사 전체 법정 풀(Pool) 스캔 및 리스크 자율 발굴을 수행 중이다 (대용량 연산 중)..."):
         try:
             response = client.models.generate_content(
                 model=model_name,
                 contents=contents,
-                config=types.GenerateContentConfig(temperature=0.1, **base_kwargs),
+                config=types.GenerateContentConfig(
+                    temperature=0.1, 
+                    max_output_tokens=8192, 
+                    **base_kwargs
+                ),
             )
         except Exception:
             response = client.models.generate_content(
                 model=model_name,
                 contents=contents,
-                config=types.GenerateContentConfig(**base_kwargs),
+                config=types.GenerateContentConfig(
+                    max_output_tokens=8192, 
+                    **base_kwargs
+                ),
             )
             
     return response.parsed
