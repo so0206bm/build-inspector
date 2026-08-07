@@ -1,6 +1,8 @@
 import os
 import html
 import datetime
+import time
+import tempfile
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -10,7 +12,7 @@ from pydantic import BaseModel, Field
 # 1. 페이지 및 레이아웃 설정
 # ==========================================
 st.set_page_config(
-    page_title="공공 공사 전 공종·세부 법령 종합 행정 사전절차 검토 시스템",
+    page_title="공공 공사 실무 및 감사대비 맞춤형 사전절차 검토 시스템",
     page_icon="⚖️",
     layout="wide"
 )
@@ -26,6 +28,16 @@ st.markdown("""
         background:#FEF3C7; border:1px solid #F59E0B; border-radius:8px;
         padding:12px 16px; font-size:0.85rem; color:#92400E; margin-top:1.5rem;
     }
+    
+    /* 📱 모바일 환경 API 키(비밀번호) 눈동자 아이콘 글자 깨짐 방지 CSS 추가 */
+    div[data-testid="stTextInput"] button {
+        font-size: 0 !important;
+        min-width: 30px !important;
+    }
+    div[data-testid="stTextInput"] button svg {
+        width: 20px;
+        height: 20px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -33,37 +45,33 @@ st.markdown("""
 # 2. Pydantic 구조화된 출력 스키마
 # ==========================================
 class AssessmentItem(BaseModel):
-    name: str = Field(description="영향평가, 인증, 인허가, 법정계획 검토 항목 명칭")
-    is_required: str = Field(description="대상 여부 (필수 / 조건부 필요 / 해당없음 / 검토필요)")
+    name: str = Field(description="영향평가, 인증, 인허가 명칭")
+    is_required: str = Field(description="대상 여부 (필수 / 조건부 필요 / 해당없음 - 기준 미달 시 이유 명시)")
     legal_basis: str = Field(description="근거 법률, 시행령, 시행규칙 조항")
-    target_criteria: str = Field(description="정확한 세부 판단 기준 (면적, 금액, 굴착깊이 등)")
+    target_criteria: str = Field(description="정확한 세부 판단 기준 (면적, 금액, 굴착깊이 등 수치 명시)")
     action_plan: str = Field(description="사전 이행 절차 및 제출/승인 기관")
 
 class ProcedureStep(BaseModel):
-    category: str = Field(description="분야 (예: 하도급·노무비, 장비대금, 안전·품질, 환경·인증, 계약·감사)")
-    stage: str = Field(description="절차 단계 (예: 기본기획, 설계/원가계상, 계약/착공전, 시공중, 준공)")
+    category: str = Field(description="분야 (예: 하도급·계약, 관급자재·신기술, 안전·품질, 폐기물(건설/임목), 현장·가설물)")
+    stage: str = Field(description="절차 단계 (예: 설계/원가계상, 계약/착공전, 시공중)")
     action: str = Field(description="이행해야 할 세부 사전 행정절차 및 현장설치 의무 내용")
     legal_basis: str = Field(description="관련 법령 및 행정규칙/고시 조항")
-    check_points: list[str] = Field(description="감사 및 실무 검토 세부 체크리스트 항목")
+    check_points: list[str] = Field(description="계약심사 및 일상감사 세부 체크리스트 항목")
 
 class ComprehensiveReviewResponse(BaseModel):
-    extracted_summary: str = Field(description="입력 문장에서 추출한 핵심 조건 요약 (공종, 금액, 면적, 특수조건 등)")
+    extracted_summary: str = Field(description="입력 문장에서 추출한 핵심 조건 요약")
     overall_summary: str = Field(description="종합 행정 검토 의견 및 누락되기 쉬운 핵심 법정 의무 사항 강조")
-    assessments: list[AssessmentItem] = Field(description="법정 영향평가, 친환경 인증, 품질/안전 세부 항목 검토 결과")
+    assessments: list[AssessmentItem] = Field(description="사업 규모와 종류에 맞춰 동적으로 판별된 법정 인허가 검토 결과")
     procedures: list[ProcedureStep] = Field(description="단계별·분야별 세부 사전 행정절차 및 감사 체크리스트")
 
 # ==========================================
-# 모델 목록 / 예시문 상수 / 세션 상태 초기화
+# 모델 목록 / 세션 상태 초기화
 # ==========================================
 MODEL_OPTIONS = {
     "gemini-3.6-flash (최신·권장)": "gemini-3.6-flash",
     "gemini-3.5-flash": "gemini-3.5-flash",
     "gemini-flash-latest (항상 최신 Flash 자동 연결)": "gemini-flash-latest",
-    "gemini-2.5-flash (2026-10-16 종료 예정)": "gemini-2.5-flash",
 }
-
-EXAMPLE_1 = "기존 노후 건물을 철거하고, 사업부지 8,000㎡에 추정공사비 15억 원 규모로 공공건축물을 신축합니다. 철거 석면조사, ZEB 인증, 품질/안전관리(CSI), 기술지도, 전자카드제, 직접시공의무, 하도급 및 기계대여대금 보증 등 전반적인 사전절차를 검토해 주세요."
-EXAMPLE_2 = "도로 점용을 포함하여 총사업비 45억 원 규모의 도로 개설 공사를 시행하고자 합니다. 교통통제 신고, 세륜/축중기, 장비대금 지급보증, 노무비 구분관리, 전자카드제 등 감사 지적에 대비한 행정절차를 알려주세요."
 
 if "user_prompt_text" not in st.session_state:
     st.session_state["user_prompt_text"] = ""
@@ -75,255 +83,182 @@ with st.sidebar:
     st.header("⚙️ 시스템 설정")
     default_api_key = os.environ.get("GOOGLE_API_KEY", "")
     api_key = st.text_input("Google Gemini API Key", value=default_api_key, type="password")
-
     model_label = st.selectbox("분석 모델 선택", list(MODEL_OPTIONS.keys()), index=0)
     selected_model = MODEL_OPTIONS[model_label]
-    if selected_model == "gemini-2.5-flash":
-        st.warning("⚠️ 이 모델은 2026-10-16 종료 예정입니다. 최신 모델 사용을 권장합니다.")
-
     st.markdown("---")
-    st.markdown("""
-    **📌 종합 감사대비 핵심 추가 검토 항목**
-    - **하도급/노무비:** 직접시공의무(건산법), 전자대금지급(하도급지킴이)
-    - **장비/기계:** 건설기계 대여대금 지급보증
-    - **인증/감리:** ZEB(제로에너지), 녹색건축 인증, 건설사업관리 용역
-    - **철거/교통:** 철거 전 석면조사, 도로공사 교통통제 신고
-    - **기존 반영:** 품질/안전계획서, 전자카드제, 기술지도(발주자계약), 환경/비산먼지
-    """)
-    st.markdown("---")
-    st.caption("본 시스템의 결과는 AI가 생성한 참고자료이며 법적 효력이 없습니다. 최종 판단은 법령 원문 및 담당 부서 검토를 거쳐야 합니다.")
+    st.markdown("**📌 스마트 동적 검토 모드 적용 중**")
+    st.caption("본 시스템의 결과는 AI가 생성한 참고자료이며 법적 효력이 없다. 최종 판단은 법령 원문 및 담당 부서 검토를 거쳐야 한다.")
 
 # ==========================================
-# 4. 메인 화면 - 자연어 입력
+# 4. 메인 화면 - PDF 업로드 및 자연어 입력
 # ==========================================
-st.markdown('<div class="main-header">⚖️ 공공 공사 실무 및 감사대비 사전절차 종합 검토 시스템</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">설계/원가계상부터 계약, 착공 시 놓치기 쉬운 모든 법정 의무(안전, 환경, 인증, 하도급, 장비/노무비)를 자동 발굴하여 검토합니다.</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">⚖️ 공공 공사 실무 및 감사대비 맞춤형 사전절차 검토 시스템</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">설계설명서/과업지시서 PDF(스캔본 포함)를 업로드하거나 내용을 직접 입력하면, AI가 법적 기준을 초과하는 필수 항목을 정밀 판독한다.</div>', unsafe_allow_html=True)
 
-st.write("**💡 테스트용 예시문 선택:**")
-col_ex1, col_ex2 = st.columns(2)
-if col_ex1.button("📌 예시 1: 철거 포함 15억 규모 건축물 신축 (석면/인증/하도급 종합)"):
-    st.session_state["user_prompt_text"] = EXAMPLE_1
-if col_ex2.button("📌 예시 2: 45억 규모 도로개설 (교통신고/장비대금/노무비 종합)"):
-    st.session_state["user_prompt_text"] = EXAMPLE_2
+uploaded_file = st.file_uploader("📄 사업계획서 또는 과업지시서 PDF 업로드 (스캔본 인식 지원)", type=["pdf"])
 
 user_prompt = st.text_area(
-    "사업 개요 및 검토 요청 사항을 자연어로 입력하세요:",
+    "추가 사업 개요 및 강조 사항 (PDF 업로드 시 부연설명만 적거나 비워둬도 됨):",
     key="user_prompt_text",
-    height=130,
-    placeholder="예시: 30억 원 규모 부지조성 공사 추진 시 적용되는 직접시공비율, 장비대여대금 보증, 노무비 관리, 환경설비(세륜기), 안전관리 및 전자카드제 관련 절차를 전부 알려줘."
+    height=120,
+    placeholder="예시: 도심지 내 유휴부지 2,500㎡에 추정금액 2억 8천만 원을 투입하여 임시 공용주차장을 조성한다. (문서를 첨부한 경우, 문서에 없는 내용만 추가로 입력할 것)"
 )
-
-submit_btn = st.button("🔍 실무 및 감사대비 정밀 검토 실행", use_container_width=True)
+submit_btn = st.button("🔍 맞춤형 정밀 행정 검토 실행", use_container_width=True)
 
 # ==========================================
 # 5. Gemini API 분석 시스템 지침
 # ==========================================
 SYSTEM_INSTRUCTION = """
-당신은 대한민국 지자체 건설·토목·건축분야 행정, 계약, 안전관리, 감사(Audit) 실무를 통달한 최고의 전문가입니다.
-단순 인허가뿐만 아니라 지자체 공사 감사에서 가장 많이 지적되는 '하도급 관리, 장비대금, 친환경 인증, 철거 전 사전조사' 항목까지 스스로 발굴하여 완벽하게 검토해야 합니다.
+당신은 대한민국 지자체 건설·토목·건축분야 행정, 계약, 안전관리, 감사(Audit) 실무를 통달한 최고의 전문가다.
+사용자의 입력(문서 및 텍스트)을 바탕으로 법적 기준치를 '수치적으로 계산 및 판단'하여, 조건에 부합하는 항목만 동적으로 도출하라.
 
-[작성 원칙: 공식 문서 문체 적용]
-보고서 작성 시 모든 문장의 끝맺음은 공식 문서 양식에 따라 반드시 '~다' (예: 시행해야 한다, 의무가 있다) 또는 명사형(예: 제출 의무, 검토 필요)으로 작성할 것. '해요', '합니다' 체는 사용하지 마십시오.
-
-[필수 전수 검토 카테고리 (절대 누락 금지)]
-
-1. **도급·하도급, 노무비 및 건설기계 관리 (건산법 등):**
-   - **직접시공의무:** 건산법 시행령 제30조의2 (70억 원 미만 공사 원도급자 직접시공 비율 산정).
-   - **건설기계 대여대금 지급보증:** 건산법 제68조의3 (장비대금 체불 방지를 위한 보증서 발급 및 비용 반영).
-   - **노무비 구분관리 및 직접지급:** 지방자치단체 입찰 및 계약 집행기준에 따른 하도급지킴이 사용 및 노무비 전용계좌 관리.
-
-2. **철거, 해체 및 교통통제 (기존 구조물/도로 점용 시):**
-   - **석면조사 의무:** 산업안전보건법 제119조 (기존 건축물/설비 철거 및 해체 전 석면조사 실시 및 노동부 제출).
-   - **도로공사 신고:** 도로교통법 시행규칙 제43조 (도로 점용 시 관할 경찰서 교통통제 및 안전계획 신고).
-
-3. **친환경 건축물 인증 및 감리 (건축공사 시):**
-   - **ZEB, 녹색건축, 에너지효율등급:** 녹색건축물 조성 지원법 시행령 (연면적 500㎡ 이상 공공건축물 대상 의무화).
-   - **장애물 없는 생활환경(BF) 인증:** 장애인등편의법 (예비/본인증).
-   - **건설사업관리(CM) 및 감리:** 건진법 제39조 (200억 이상 또는 특정 공종 건설사업관리 발주).
-
-4. **품질 및 안전·보건 관리 체계:**
-   - **건진법:** 품질관리계획/품질시험계획, 시험실 및 인력 배치, 안전관리계획서(CSI), DFS 설계안전성 검토.
-   - **산안법:** 재해예방기술지도(발주자 직접계약 1억~120억 미만), 발주자 안전보건대장(50억 이상), 유해위험방지계획서.
-   
-5. **현장 환경/근로자 관리 및 각종 인허가:**
-   - **근로자:** 건설근로자법 (공공 1억 이상 전자카드제 의무).
-   - **환경/시설:** 비산먼지/특정공사 소음 신고, 세륜기/측면살수시설, 도로 파손 방지용 축중기 설치.
-   - **법정평가:** 소규모 환경영향평가, 재해영향평가, 지하안전평가, 매장유산 지표조사.
+[동적 판단 및 수치 검토 원칙]
+1. **폐기물 3단계 정밀 판별 (건설폐기물 및 임목폐기물):**
+   - **건설폐기물:** 100톤 이상이면 '건설폐기물 분리발주 의무', 5톤~100톤 미만이면 '건설폐기물 처리계획 사전신고' 대상으로 판별한다.
+   - **임목폐기물 (벌목, 제초, 수목 제거 등):** 5톤 이상 발생 예상 시, 폐기물관리법 제17조에 따라 '사업장일반폐기물(임목폐기물) 분리발주' 대상으로 명확히 지적한다.
+2. **계약 방식, 신기술 및 관급자재 (지방계약법 및 판로지원법):**
+   - 금액 분석을 통해 일상감사/계약심사 대상 여부(보통 종합 3억, 전문 2억 이상 등) 및 입찰 방식을 명시한다.
+   - 공사 내용에 특허나 특정 공법이 예상될 경우 '신기술·특허공법 선정위원회' 사전 심의를 반드시 검토 항목에 넣는다.
+   - 추정금액(종합 40억, 전문 30억 등)을 초과할 경우 '중소기업 관급자재 직접구매 대상 품목' 사전 검토 의무를 부여한다.
+3. **가설물 및 공종별 특화 필터링:**
+   - 현장사무소가 예상되는 공사 시 '가설건축물 축조신고(건축법)' 대상을 검토한다.
+   - 복합 공종(예: 토목+통신/전기)일 경우, 금액과 무관하게 '정보통신공사업법/전기공사업법 분리발주' 의무를 지적한다.
+4. **규모 미달 시 '해당 없음' 명시 (환경/지하안전 등):**
+   - 환경영향평가법, 지하안전법 등은 면적과 굴착 깊이가 기준치 미달일 경우, 반드시 "해당 없음 (사유: 기준 미달)"으로 표기하여 억지 나열을 엄격히 방지한다.
 
 [작성 수칙]
-- 모든 검토 항목에서 **법률명 + 시행령/시행규칙/고시 명칭 및 관련 조항**을 정확히 기입한다.
-- 검토 대상이 아닌 항목이라도 "해당 없음(이유)"을 명시하여 검토했음을 증명한다.
+- 공식 문서 양식에 따라 문장의 끝맺음은 '~다', '~할 것', '필요함' 등으로 작성한다. ('해요/합니다' 절대 금지)
+- 관련 법령은 시행령, 시행규칙 조항까지 구체적으로 적시한다.
 """
 
-_SAMPLING_ERROR_HINTS = (
-    "temperature", "top_p", "top_k", "sampling", "not supported", "unknown field", "invalid argument"
-)
+def analyze_comprehensive_project(text: str, file_obj, key: str, model_name: str) -> ComprehensiveReviewResponse | None:
+    client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=300000))
+    contents = []
+    
+    # 1) PDF 파일이 업로드된 경우 Gemini 서버로 전송 및 상태 대기
+    if file_obj is not None:
+        with st.spinner("🔄 스캔본 PDF를 AI 서버로 전송 및 시각 판독 중이다. 용량에 따라 수십 초가 소요될 수 있다..."):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(file_obj.getvalue())
+                tmp_path = tmp.name
+            
+            gemini_file = client.files.upload(file=tmp_path, mime_type="application/pdf")
+            
+            # AI 서버에서 파일 처리가 완료(ACTIVE)될 때까지 대기
+            while True:
+                f_info = client.files.get(name=gemini_file.name)
+                state_str = str(f_info.state).upper()
+                if "ACTIVE" in state_str:
+                    break
+                elif "FAILED" in state_str:
+                    os.remove(tmp_path)
+                    raise Exception("AI 서버에서 PDF 파일을 판독하는 데 실패했다.")
+                time.sleep(2)
+                
+            contents.append(gemini_file)
+            os.remove(tmp_path)
+            
+    # 2) 텍스트 입력이 있는 경우 추가
+    if text.strip():
+        contents.append(f"[사용자 추가 입력 및 지시사항]\n{text}")
+    elif not contents:
+        raise ValueError("분석할 내용이 없다. 텍스트를 입력하거나 PDF 파일을 업로드해야 한다.")
+    else:
+        contents.append("[사용자 지시사항]\n첨부된 문서를 정밀하게 판독하여 사전에 필요한 행정절차와 검토 항목을 도출하라.")
 
-def analyze_comprehensive_project(text: str, key: str, model_name: str) -> ComprehensiveReviewResponse | None:
-    client = genai.Client(
-        api_key=key,
-        http_options=types.HttpOptions(timeout=300000)
-    )
-    contents = f"[사용자 입력 내용]\n{text}"
     base_kwargs = dict(
         system_instruction=SYSTEM_INSTRUCTION,
         response_mime_type="application/json",
         response_schema=ComprehensiveReviewResponse,
     )
-
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=types.GenerateContentConfig(temperature=0.1, **base_kwargs),
-        )
-    except Exception as e:
-        if any(hint in str(e).lower() for hint in _SAMPLING_ERROR_HINTS):
+    
+    with st.spinner("법령 대조 및 맞춤형 정밀 행정 검토를 수행 중이다. 잠시 대기할 것..."):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(temperature=0.1, **base_kwargs),
+            )
+        except Exception:
             response = client.models.generate_content(
                 model=model_name,
                 contents=contents,
                 config=types.GenerateContentConfig(**base_kwargs),
             )
-        else:
-            raise
-
+            
     return response.parsed
 
-# ==========================================
-# 표시 및 보고서 유틸
-# ==========================================
 def build_procedures_html(procedures: list[ProcedureStep]) -> str:
-    headers = ["구분", "단계", "이행 사전절차 / 현장설치의무", "관련 법령 (시행령/시행규칙)", "주요 감사 및 실무 체크리스트"]
+    headers = ["구분", "단계", "이행 사전절차 / 현장설치", "관련 법령", "주요 감사 체크리스트"]
     parts = ['<table class="review-table"><thead><tr>']
     parts += [f"<th>{html.escape(h)}</th>" for h in headers]
     parts.append("</tr></thead><tbody>")
     for proc in procedures:
         checks = "<br>".join(f"• {html.escape(c)}" for c in proc.check_points) or "-"
-        cells = [
-            html.escape(proc.category),
-            html.escape(proc.stage),
-            html.escape(proc.action),
-            html.escape(proc.legal_basis),
-            checks,
-        ]
+        cells = [html.escape(proc.category), html.escape(proc.stage), html.escape(proc.action), html.escape(proc.legal_basis), checks]
         parts.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
     parts.append("</tbody></table>")
     return "".join(parts)
 
-def _md_cell(text: str) -> str:
+def _md_cell(text: str) -> str: 
     return str(text).replace("|", "\\|").replace("\n", "<br>")
 
-def build_report_markdown(result: ComprehensiveReviewResponse, model_name: str) -> str:
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+def build_report_markdown(result, model_name) -> str:
     lines = [
-        "# 공공 공사 실무 및 감사대비 사전절차 종합 검토 보고서",
-        "",
-        f"- 생성일시: {now}",
-        f"- 분석 모델: {model_name}",
-        "",
-        "## AI 조건 추출 요약",
-        result.extracted_summary,
-        "",
-        "## 종합 행정 검토 의견",
-        result.overall_summary,
-        "",
-        "## 1. 법정 검토 항목 (영향평가, 인증, 하도급, 안전, 품질)",
-        "",
-        "| 검토 항목 | 대상 여부 | 근거 법령 (시행령/규칙/고시) | 판단 및 적용 기준 | 이행 절차 및 협의/설치 부서 |",
-        "|---|---|---|---|---|",
+        "# 공공 공사 실무 및 감사대비 맞춤형 사전절차 검토 보고서",
+        "", f"- 분석 모델: {model_name}", "",
+        "## AI 조건 추출 요약", result.extracted_summary, "",
+        "## 종합 행정 검토 의견", result.overall_summary, "",
+        "## 1. 법정 검토 항목 (규모 및 공종별 맞춤 판별)", "",
+        "| 검토 항목 | 대상 여부 | 근거 법령 (시행령/규칙) | 판단 및 적용 기준 | 이행 절차 및 협의 부서 |",
+        "|---|---|---|---|---|"
     ]
     for item in result.assessments:
-        lines.append(
-            f"| {_md_cell(item.name)} | {_md_cell(item.is_required)} | {_md_cell(item.legal_basis)} "
-            f"| {_md_cell(item.target_criteria)} | {_md_cell(item.action_plan)} |"
-        )
-
-    lines += [
-        "",
-        "## 2. 분야별 세부 행정절차 및 실무/감사 체크리스트",
-        "",
-        "| 구분 | 단계 | 이행 사전절차 / 현장설치의무 | 관련 법령 (시행령/규칙) | 주요 감사 체크리스트 |",
-        "|---|---|---|---|---|",
-    ]
+        lines.append(f"| {_md_cell(item.name)} | {_md_cell(item.is_required)} | {_md_cell(item.legal_basis)} | {_md_cell(item.target_criteria)} | {_md_cell(item.action_plan)} |")
+    lines += ["", "## 2. 분야별 세부 행정절차 및 실무/감사 체크리스트", "", "| 구분 | 단계 | 이행 사전절차 / 현장설치 | 관련 법령 | 주요 감사 체크리스트 |", "|---|---|---|---|---|"]
     for proc in result.procedures:
         checks = "<br>".join(f"• {c}" for c in proc.check_points)
-        lines.append(
-            f"| {_md_cell(proc.category)} | {_md_cell(proc.stage)} | {_md_cell(proc.action)} "
-            f"| {_md_cell(proc.legal_basis)} | {_md_cell(checks)} |"
-        )
-
-    lines += [
-        "",
-        "---",
-        "> ⚠️ 본 보고서는 AI가 생성한 참고자료로 법적 효력이 없습니다. "
-        "제시된 조항 및 수치 기준은 반드시 관계 법령 원문과 담당 부서 검토를 통해 확인하시기 바랍니다.",
-    ]
+        lines.append(f"| {_md_cell(proc.category)} | {_md_cell(proc.stage)} | {_md_cell(proc.action)} | {_md_cell(proc.legal_basis)} | {_md_cell(checks)} |")
     return "\n".join(lines)
 
 # ==========================================
 # 6. 실행 및 결과 출력
 # ==========================================
 if submit_btn:
-    current_text = st.session_state.get("user_prompt_text", "").strip()
-    if not current_text:
-        st.warning("⚠️ 검토할 사업 내용을 입력해주세요.")
-    elif not api_key:
-        st.error("🔑 사이드바에 Google Gemini API Key를 입력해주세요.")
+    if not user_prompt.strip() and uploaded_file is None:
+        st.warning("⚠️ 텍스트로 사업 내용을 입력하거나 PDF 파일을 업로드해야 한다.")
+    elif not api_key: 
+        st.error("🔑 API Key를 입력해야 한다.")
     else:
-        with st.spinner("감사 빈출 항목(하도급, 장비대금, 노무비, 인증 등)까지 포함하여 전수 분석 중입니다..."):
-            try:
-                result = analyze_comprehensive_project(current_text, api_key, selected_model)
-                if result is None:
-                    st.error("AI가 구조화된 응답을 생성하지 못했습니다. 입력 문장을 조금 더 구체적으로 작성하거나 다시 시도해주세요.")
-                else:
-                    st.session_state["last_result"] = result
-                    st.session_state["last_model"] = selected_model
-            except Exception as e:
-                st.error(f"분석 중 오류가 발생했습니다: {str(e)}")
+        try:
+            res = analyze_comprehensive_project(user_prompt, uploaded_file, api_key, selected_model)
+            if res:
+                st.session_state["last_result"] = res
+                st.session_state["last_model"] = selected_model
+        except Exception as e:
+            st.error(f"분석 중 오류가 발생했다: {str(e)}")
 
 if "last_result" in st.session_state:
-    result = st.session_state["last_result"]
-    used_model = st.session_state.get("last_model", selected_model)
-
-    st.success(f"✅ 종합 감사대비 정밀 행정 검토가 완료되었습니다. (모델: {used_model})")
-
+    res = st.session_state["last_result"]
+    used_model = st.session_state["last_model"]
+    
+    st.success(f"✅ 맞춤형 정밀 행정 검토가 완료되었다. (모델: {used_model})")
     st.subheader("🔎 AI 조건 추출 요약")
-    st.info(result.extracted_summary)
-
+    st.info(res.extracted_summary)
     st.subheader("📋 종합 행정 검토 의견")
-    st.write(result.overall_summary)
-
-    st.subheader("🌳 1. 법정 검토 항목 (영향평가, 인증, 하도급, 안전, 품질)")
-    if result.assessments:
-        assess_data = [{
-            "검토 항목": item.name,
-            "대상 여부": item.is_required,
-            "근거 법령": item.legal_basis,
-            "판단 및 적용 기준": item.target_criteria,
-            "이행 절차": item.action_plan,
-        } for item in result.assessments]
-        st.table(assess_data)
-    else:
-        st.caption("해당 항목에 대한 분석 결과가 없습니다.")
-
+    st.write(res.overall_summary)
+    
+    st.subheader("🌳 1. 법정 검토 항목 (규모 및 공종별 맞춤 판별)")
+    if res.assessments:
+        st.table([{"검토 항목": i.name, "대상 여부": i.is_required, "근거 법령": i.legal_basis, "판단 기준": i.target_criteria, "이행 절차": i.action_plan} for i in res.assessments])
+    
     st.subheader("📑 2. 분야별 세부 행정절차 및 실무/감사 체크리스트")
-    if result.procedures:
-        st.markdown(build_procedures_html(result.procedures), unsafe_allow_html=True)
-    else:
-        st.caption("해당 항목에 대한 분석 결과가 없습니다.")
-
-    st.markdown("""
-        <div class="disclaimer-box">
-        ⚠️ <b>안내</b> — 본 결과는 AI가 생성한 참고자료로 <b>법적 효력이 없습니다.</b>
-        제시된 기준은 실제 법령 개정에 따라 다를 수 있으므로, 최종 확정 전 반드시 관계 법령 원문을 확인하시기 바랍니다.
-        </div>
-    """, unsafe_allow_html=True)
-
-    report_md = build_report_markdown(result, used_model)
+    if res.procedures:
+        st.markdown(build_procedures_html(res.procedures), unsafe_allow_html=True)
+        
     st.download_button(
-        label="📥 검토 결과 보고서 다운로드 (Markdown)",
-        data=report_md.encode("utf-8"),
-        file_name=f"공사행정검토_감사대비_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.md",
-        mime="text/markdown",
-        use_container_width=True,
+        "📥 보고서 다운로드 (Markdown)", 
+        data=build_report_markdown(res, used_model).encode("utf-8"), 
+        file_name=f"공사검토_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.md", 
+        mime="text/markdown"
     )
