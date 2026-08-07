@@ -168,19 +168,22 @@ def analyze_comprehensive_project(text: str, file_obj, key: str, model_name: str
             gemini_file = client.files.upload(file=tmp_path, mime_type="application/pdf")
             
             while True:
-                f_info = client.files.get(name=gemini_file.name)
-                state_str = str(f_info.state).upper()
-                if "ACTIVE" in state_str:
-                    break
-                elif "FAILED" in state_str:
-                    os.remove(tmp_path)
-                    raise Exception("AI 서버에서 PDF 파일을 판독하는 데 실패했다.")
+                try:
+                    f_info = client.files.get(name=gemini_file.name)
+                    state_str = str(f_info.state).upper()
+                    if "ACTIVE" in state_str:
+                        break
+                    elif "FAILED" in state_str:
+                        os.remove(tmp_path)
+                        raise Exception("AI 서버에서 PDF 파일을 판독하는 데 실패했다.")
+                except Exception:
+                    pass
                 time.sleep(2)
                 
             contents.append(gemini_file)
             os.remove(tmp_path)
             
-    if text.strip():
+    if text and text.strip():
         contents.append(f"[사용자 추가 입력 및 지시사항]\n{text}")
     elif not contents:
         raise ValueError("분석할 내용이 없다. 텍스트를 입력하거나 PDF 파일을 업로드해야 한다.")
